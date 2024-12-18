@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from PyQt5 import QtWidgets, QtGui, QtCore
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from collections import deque
+
 
 # Định nghĩa lớp Node cho các loại cây
 class Node:
@@ -138,163 +140,279 @@ def delete_avl(root, key):
         return rotate_left(root)
     return root
 
+
 def delete_binary(node, key):
-    if not node:
-        return node
-    if key == node.val:
-        if not node.left:
-            return node.right
-        elif not node.right:
-            return node.left
+    """
+    Xóa nút có giá trị 'key' trong cây nhị phân thông thường.
+    """
+    if node is None:
+        return None  # Nút rỗng, không cần xử lý
+
+    # Tìm nút cần xóa ở cây con trái hoặc cây con phải
+    if random.choice([True, False]):  # Lựa chọn ngẫu nhiên (đặc trưng của cây nhị phân thông thường)
+        node.left = delete_binary(node.left, key)
+    else:
+        node.right = delete_binary(node.right, key)
+
+    if node.val == key:
+        # Trường hợp 1: Nút lá (không có con)
+        if node.left is None and node.right is None:
+            return None
+
+        # Trường hợp 2: Nút có 1 con
+        if node.left is None:
+            return node.right  # Gán con phải cho nút cha
+        elif node.right is None:
+            return node.left  # Gán con trái cho nút cha
+
+        # Trường hợp 3: Nút có 2 con
+        # Thay thế bằng giá trị nhỏ nhất trong cây con phải
         temp = get_min_value_node(node.right)
         node.val = temp.val
         node.right = delete_binary(node.right, temp.val)
-    else:
-        if random.choice([True, False]):
-            node.left = delete_binary(node.left, key)
-        else:
-            node.right = delete_binary(node.right, key)
+
     return node
 
+
 def get_min_value_node(node):
+    """
+    Hàm tìm giá trị nhỏ nhất trong cây con phải.
+    """
     current = node
     while current.left is not None:
         current = current.left
     return current
+
 
 def generate_unique_random_numbers(count, min_val, max_val):
     if max_val - min_val + 1 < count:
         raise ValueError("Khoảng giá trị không đủ để tạo các giá trị ngẫu nhiên không trùng lặp!")
     return random.sample(range(min_val, max_val + 1), count)
 
+def export_tree(root):
+    """
+    Xuất cây dưới dạng danh sách các cấp độ.
+    """
+    if not root:
+        return []
+    levels = []
+    queue = deque([root])
+    while queue:
+        level = []
+        for _ in range(len(queue)):
+            node = queue.popleft()
+            level.append(node.val if node else None)
+            if node:
+                queue.append(node.left)
+                queue.append(node.right)
+        levels.append(level)
+    return levels
+
+
+def import_tree(levels):
+    """
+    Tạo lại cây từ danh sách các cấp độ.
+    """
+    if not levels or not levels[0]:
+        return None
+    root = Node(levels[0][0])
+    queue = deque([root])
+    index = 1
+    while queue and index < len(levels):
+        node = queue.popleft()
+        if node:
+            left_val = levels[index].pop(0) if levels[index] else None
+            right_val = levels[index].pop(0) if levels[index] else None
+
+            node.left = Node(left_val) if left_val is not None else None
+            node.right = Node(right_val) if right_val is not None else None
+
+            queue.append(node.left)
+            queue.append(node.right)
+
+        if not levels[index]:
+            index += 1
+    return root
 class TreeCanvas(FigureCanvas):
     def __init__(self, parent=None):
         fig, self.ax = plt.subplots(figsize=(10, 8))
         super().__init__(fig)
         self.setParent(parent)
-        self.selected_nodes = set()
-        self.node_positions = {}
+        self.selected_nodes = set()  # Nút đã được chọn
+        self.node_positions = {}  # Tọa độ logic của các nút
+        self.context_menu = QtWidgets.QMenu(self)  # Menu chuột phải
+
+        # Kết nối sự kiện chuột
+        self.mpl_connect("button_press_event", self.on_mouse_click)
 
     def display_tree(self, root):
+        """
+        Vẽ cây theo dạng từ trên xuống với các node không nằm chồng chéo nhau.
+        """
         self.ax.clear()
         G = nx.DiGraph()
         self.node_positions.clear()
 
-        def add_edges(node, x=0, y=0, dx=1.5):
+        # Tính toán vị trí x, y của các nút
+        def calculate_positions(node, depth=0, x_pos=0, x_gap=1.5):
             if node is not None:
-                self.node_positions[node.val] = (x, y)
+                self.node_positions[node.val] = (x_pos, -depth)  # Y ngược xuống dưới
                 G.add_node(node.val)
 
-                if node.left is not None:
+                if node.left:
                     G.add_edge(node.val, node.left.val)
-                    add_edges(node.left, x - dx, y - 1, dx / 1.5)
-                if node.right is not None:
+                    calculate_positions(node.left, depth + 1, x_pos - x_gap, x_gap / 2)
+
+                if node.right:
                     G.add_edge(node.val, node.right.val)
-                    add_edges(node.right, x + dx, y - 1, dx / 1.5)
+                    calculate_positions(node.right, depth + 1, x_pos + x_gap, x_gap / 2)
 
-        add_edges(root)
+        calculate_positions(root)
 
+        # Tô màu các nút
+        node_colors = ["red" if n in self.selected_nodes else "lightblue" for n in G.nodes()]
         nx.draw(G, self.node_positions, with_labels=True, labels={n: n for n in G.nodes()},
-                node_size=2000, node_color=['red' if n in self.selected_nodes else 'lightblue' for n in G.nodes()],
-                font_size=12, font_weight='bold', ax=self.ax, arrows=False)
-
+                node_size=1500, node_color=node_colors, font_size=12, font_weight='bold', ax=self.ax, arrows=False)
         self.draw()
 
-    def mousePressEvent(self, event):
-        node_radius = 3.5
-        x, y = self.ax.transData.inverted().transform(
-            (event.x(), event.y()))
-        closest_node = None
+    def on_mouse_click(self, event):
+        """
+        Xử lý sự kiện click chuột để chọn nút hoặc hiện context menu.
+        """
+        if event.xdata is None or event.ydata is None:
+            return  # Không click vào vùng hợp lệ
+
+        clicked_node = None
         min_distance = float('inf')
 
-        for node, pos in self.node_positions.items():
-            distance = ((x - pos[0]) ** 2 + (y - pos[1]) ** 2) ** 0.5
-            if distance <= node_radius and distance < min_distance:
-                closest_node = node
+        # Xác định nút gần nhất với vị trí chuột
+        for node, (x, y) in self.node_positions.items():
+            distance = ((event.xdata - x) ** 2 + (event.ydata - y) ** 2) ** 0.5
+            if distance < 0.5 and distance < min_distance:  # Ngưỡng 0.5 để xác định nút
+                clicked_node = node
                 min_distance = distance
 
-        if closest_node is not None:
-            if event.button() == QtCore.Qt.LeftButton:
-                self.toggle_node_selection(closest_node)
-            elif event.button() == QtCore.Qt.RightButton and closest_node in self.selected_nodes:
-                self.show_context_menu(closest_node, QtCore.QPoint(event.globalX(), event.globalY()))
+        if clicked_node:
+            if event.button == 1:  # Chuột trái
+                self.toggle_node_selection(clicked_node)
+            elif event.button == 3:  # Chuột phải
+                self.show_context_menu(event, clicked_node)
 
     def toggle_node_selection(self, node):
+        """
+        Chuyển đổi trạng thái chọn của nút.
+        """
         if node in self.selected_nodes:
             self.selected_nodes.remove(node)
         else:
             self.selected_nodes.add(node)
-        self.display_tree(self.parent().tree_root)
+        self.display_tree(self.parent().tree_root)  # Cập nhật lại cây
 
-    def show_context_menu(self, node, pos):
-        menu = QtWidgets.QMenu(self)
-        add_action = menu.addAction("Thêm nút")
-        delete_action = menu.addAction("Xóa nút")
+    def show_context_menu(self, event, node):
+        """
+        Hiển thị context menu với các tùy chọn thêm và xóa nút.
+        """
+        self.context_menu.clear()
 
-        add_action.triggered.connect(lambda: self.parent().add_node(node))
-        delete_action.triggered.connect(lambda: self.parent().delete_node(node))
+        # Hiển thị thông tin nút
+        node_info = QtWidgets.QAction(f"Nút đang chọn: {node}", self.context_menu)
+        node_info.setEnabled(False)
+        self.context_menu.addAction(node_info)
 
-        menu.exec_(pos)
+        # Thêm nút
+        add_action = QtWidgets.QAction("Thêm nút", self.context_menu)
+        add_action.triggered.connect(lambda checked=False: self.parent().add_node(node))
+        self.context_menu.addAction(add_action)
+
+        # Xóa nút
+        delete_action = QtWidgets.QAction("Xóa nút", self.context_menu)
+        delete_action.triggered.connect(lambda checked=False: self.parent().delete_node(node))
+        self.context_menu.addAction(delete_action)
+
+        # Hiển thị menu tại vị trí chuột
+        self.context_menu.exec_(self.mapToGlobal(QtCore.QPoint(event.x, event.y)))
+
 
 class ManualTreeDialog(QtWidgets.QDialog):
     def __init__(self, parent, tree_type):
         super().__init__(parent)
         self.tree_type = tree_type
         self.tree_root = None
-        self.parent = parent  # Tham chiếu đến lớp cha để cập nhật canvas
-        self.node_list = []  # Danh sách các nút đã được thêm
+        self.node_dict = {}  # Lưu {node_value: [left_child, right_child]}
         self.initUI()
 
     def initUI(self):
         self.setWindowTitle(f"Tạo cây thủ công - {self.tree_type}")
-        self.setGeometry(200, 100, 200, 200)
+        self.setGeometry(200, 100, 600, 400)
 
-        layout = QtWidgets.QVBoxLayout(self)
+        main_layout = QtWidgets.QHBoxLayout(self)
 
-        # Nhập giá trị nút gốc
+        # Bên trái: Danh sách nút hiển thị dạng bảng
+        left_layout = QtWidgets.QVBoxLayout()
+        left_layout.addWidget(QtWidgets.QLabel("Danh sách các nút (Hiển thị chuẩn):"))
+        self.node_table = QtWidgets.QTableWidget()
+        self.node_table.setColumnCount(3)
+        self.node_table.setHorizontalHeaderLabels(["Nút", "Con trái", "Con phải"])
+        self.node_table.horizontalHeader().setStretchLastSection(True)
+        left_layout.addWidget(self.node_table)
+        main_layout.addLayout(left_layout)
+
+        # Bên phải: Phần nhập nút và các chức năng
+        right_layout = QtWidgets.QVBoxLayout()
+
+        # Nút thêm gốc
         self.root_input = QtWidgets.QLineEdit()
         self.root_input.setPlaceholderText("Nhập giá trị nút gốc...")
-        layout.addWidget(QtWidgets.QLabel("Nút gốc:"))
-        layout.addWidget(self.root_input)
-
-        # Nút xác nhận thêm gốc
+        right_layout.addWidget(QtWidgets.QLabel("Thêm nút gốc:"))
+        right_layout.addWidget(self.root_input)
         self.add_root_button = QtWidgets.QPushButton("Thêm nút gốc")
         self.add_root_button.clicked.connect(self.add_root)
-        layout.addWidget(self.add_root_button)
+        right_layout.addWidget(self.add_root_button)
+
+        # Chọn nút cha từ danh sách
+        right_layout.addWidget(QtWidgets.QLabel("Chọn nút cha:"))
+        self.parent_combo = QtWidgets.QComboBox()
+        self.parent_combo.currentIndexChanged.connect(self.update_add_buttons)
+        right_layout.addWidget(self.parent_combo)
 
         # Nhập giá trị nút con
-        self.child_input = QtWidgets.QLineEdit()
-        self.child_input.setPlaceholderText("Nhập giá trị nút con...")
-        self.child_input.textChanged.connect(self.update_buttons)  # Kích hoạt kiểm tra nút khi nhập
-        layout.addWidget(QtWidgets.QLabel("Thêm nút:"))
-        layout.addWidget(self.child_input)
+        self.node_input = QtWidgets.QLineEdit()
+        self.node_input.setPlaceholderText("Nhập giá trị nút con...")
+        self.node_input.setDisabled(True)  # Vô hiệu hóa cho đến khi có nút gốc
+        self.node_input.textChanged.connect(self.update_add_buttons)  # Kiểm tra nút nhập hợp lệ
+        right_layout.addWidget(QtWidgets.QLabel("Nhập giá trị nút con:"))
+        right_layout.addWidget(self.node_input)
 
-        # Chọn thêm vào bên trái hay phải
+        # Nút thêm trái/phải
         self.add_left_button = QtWidgets.QPushButton("Thêm vào trái")
         self.add_right_button = QtWidgets.QPushButton("Thêm vào phải")
+        self.add_left_button.setDisabled(True)
+        self.add_right_button.setDisabled(True)
         self.add_left_button.clicked.connect(lambda: self.add_child("left"))
         self.add_right_button.clicked.connect(lambda: self.add_child("right"))
-
         button_layout = QtWidgets.QHBoxLayout()
         button_layout.addWidget(self.add_left_button)
         button_layout.addWidget(self.add_right_button)
-        layout.addLayout(button_layout)
+        right_layout.addLayout(button_layout)
 
-        # Danh sách các nút đã thêm
-        layout.addWidget(QtWidgets.QLabel("Danh sách các nút:"))
-        self.node_list_widget = QtWidgets.QListWidget()
-        layout.addWidget(self.node_list_widget)
+        # Chọn nút muốn đổi vị trí
+        right_layout.addWidget(QtWidgets.QLabel("Chọn nút muốn đổi vị trí:"))
+        self.swap_combo = QtWidgets.QComboBox()
+        self.swap_combo.setDisabled(True)
+        right_layout.addWidget(self.swap_combo)
 
-        # Nút đổi vị trí (chỉ cho cây nhị phân thông thường)
-        self.swap_button = QtWidgets.QPushButton("Đổi vị trí trái và phải")
+        self.swap_button = QtWidgets.QPushButton("Đổi vị trí trái-phải")
+        self.swap_button.setDisabled(True)
         self.swap_button.clicked.connect(self.swap_child)
-        self.swap_button.setVisible(self.tree_type == "Cây nhị phân thông thường")
-        layout.addWidget(self.swap_button)
+        right_layout.addWidget(self.swap_button)
 
         # Nút hoàn tất
         self.done_button = QtWidgets.QPushButton("Hoàn tất")
         self.done_button.clicked.connect(self.done_button_pressed)
-        layout.addWidget(self.done_button)
+        right_layout.addWidget(self.done_button)
+
+        main_layout.addLayout(right_layout)
+        self.setLayout(main_layout)
 
     def add_root(self):
         try:
@@ -304,105 +422,189 @@ class ManualTreeDialog(QtWidgets.QDialog):
                 return
 
             self.tree_root = Node(value)
-            self.node_list.append(f"Root: {value}")
-            self.update_node_list()
-            self.add_root_button.setDisabled(True)  # Không cho thêm nút gốc lần nữa
-            self.update_buttons()
-            self.parent.canvas.display_tree(self.tree_root)  # Cập nhật canvas
+            self.node_dict[value] = [None, None]
+            self.update_table()
+            self.update_parent_combo()
+            self.update_swap_combo()
+            self.root_input.clear()
+            self.add_root_button.setDisabled(True)
+            self.node_input.setDisabled(False)
+            self.swap_combo.setDisabled(False)
+            self.swap_button.setDisabled(False)
+            self.parent().canvas.display_tree(self.tree_root)
         except ValueError:
             QtWidgets.QMessageBox.warning(self, "Lỗi", "Vui lòng nhập một số nguyên hợp lệ!")
 
     def add_child(self, side):
         try:
-            value = int(self.child_input.text())
-            if not self.tree_root:
-                QtWidgets.QMessageBox.warning(self, "Lỗi", "Vui lòng thêm nút gốc trước!")
+            value = int(self.node_input.text())
+            parent_value = int(self.parent_combo.currentText())
+            if parent_value not in self.node_dict:
+                QtWidgets.QMessageBox.warning(self, "Lỗi", "Nút cha không tồn tại!")
                 return
 
+            parent_node = self.find_node(self.tree_root, parent_value)
             if side == "left":
-                if self.tree_type == "BST" or self.tree_type == "AVL":
-                    if value >= self.tree_root.val:
-                        QtWidgets.QMessageBox.warning(self, "Lỗi", "Giá trị không hợp lệ cho cây BST hoặc AVL!")
-                        return
-                self.tree_root.left = insert_binary(self.tree_root.left, value)
-                self.node_list.append(f"Left: {value}")
+                if parent_node.left is not None:
+                    QtWidgets.QMessageBox.warning(self, "Lỗi", "Nút con trái đã tồn tại!")
+                    return
+                parent_node.left = Node(value)
+                self.node_dict[parent_value][0] = value
             elif side == "right":
-                if self.tree_type == "BST" or self.tree_type == "AVL":
-                    if value <= self.tree_root.val:
-                        QtWidgets.QMessageBox.warning(self, "Lỗi", "Giá trị không hợp lệ cho cây BST hoặc AVL!")
-                        return
-                self.tree_root.right = insert_binary(self.tree_root.right, value)
-                self.node_list.append(f"Right: {value}")
+                if parent_node.right is not None:
+                    QtWidgets.QMessageBox.warning(self, "Lỗi", "Nút con phải đã tồn tại!")
+                    return
+                parent_node.right = Node(value)
+                self.node_dict[parent_value][1] = value
 
-            self.update_node_list()  # Cập nhật danh sách các nút đã thêm
-            self.update_buttons()  # Cập nhật trạng thái của các nút
-            self.child_input.clear()  # Xóa nội dung nhập
-            self.parent.canvas.display_tree(self.tree_root)  # Hiển thị cây trên canvas
+            self.node_dict[value] = [None, None]
+            self.update_table()
+            current_index = self.parent_combo.currentIndex()
+            self.update_parent_combo()
+            self.parent_combo.setCurrentIndex(current_index)
+            self.update_swap_combo()
+            self.node_input.clear()
+            self.parent().canvas.display_tree(self.tree_root)
+            self.update_add_buttons()
         except ValueError:
             QtWidgets.QMessageBox.warning(self, "Lỗi", "Vui lòng nhập một số nguyên hợp lệ!")
 
     def swap_child(self):
-        """
-        Đổi vị trí các nút con trái và phải.
-        """
-        if self.tree_root and self.tree_root.left and self.tree_root.right:
-            self.tree_root.left, self.tree_root.right = self.tree_root.right, self.tree_root.left
-            QtWidgets.QMessageBox.information(self, "Thành công", "Đã đổi vị trí trái và phải!")
-            self.node_list.append("Swapped children")
-            self.update_node_list()
-            self.parent.canvas.display_tree(self.tree_root)
-
-    def update_node_list(self):
-        """
-        Cập nhật danh sách các nút đã thêm vào widget.
-        """
-        self.node_list_widget.clear()
-        self.node_list_widget.addItems(self.node_list)
-
-    def update_buttons(self):
-        """
-        Cập nhật trạng thái của các nút thêm trái/phải dựa trên logic của từng loại cây.
-        """
         try:
-            value = int(self.child_input.text())
+            value = int(self.swap_combo.currentText())
+            if value not in self.node_dict:
+                QtWidgets.QMessageBox.warning(self, "Lỗi", "Nút này không tồn tại trong cây!")
+                return
+
+            left, right = self.node_dict[value]
+            self.node_dict[value] = [right, left]
+            node = self.find_node(self.tree_root, value)
+            if node:
+                node.left, node.right = node.right, node.left
+                self.update_table()
+                self.parent().canvas.display_tree(self.tree_root)
+                QtWidgets.QMessageBox.information(self, "Thành công", "Đã đổi vị trí trái và phải!")
+        except ValueError:
+            QtWidgets.QMessageBox.warning(self, "Lỗi", "Vui lòng nhập một số nguyên hợp lệ!")
+
+    def update_table(self):
+        self.node_table.setRowCount(len(self.node_dict))
+        for i, (node, children) in enumerate(self.node_dict.items()):
+            self.node_table.setItem(i, 0, QtWidgets.QTableWidgetItem(str(node)))
+            self.node_table.setItem(i, 1, QtWidgets.QTableWidgetItem(str(children[0]) if children[0] else ""))
+            self.node_table.setItem(i, 2, QtWidgets.QTableWidgetItem(str(children[1]) if children[1] else ""))
+
+    def update_parent_combo(self):
+        current_text = self.parent_combo.currentText()
+        self.parent_combo.blockSignals(True)
+        self.parent_combo.clear()
+        self.parent_combo.addItems(map(str, self.node_dict.keys()))
+        if current_text in self.node_dict:
+            self.parent_combo.setCurrentText(current_text)
+        self.parent_combo.blockSignals(False)
+
+    def update_swap_combo(self):
+        self.swap_combo.clear()
+        self.swap_combo.addItems(map(str, self.node_dict.keys()))
+
+    def update_add_buttons(self):
+        try:
+            parent_value = int(self.parent_combo.currentText())
+            new_value = int(self.node_input.text())
+            parent_node = self.find_node(self.tree_root, parent_value)
+
+            if self.tree_type in ["BST", "AVL"]:
+                min_value, max_value = self.get_valid_range(self.tree_root, parent_value)
+                if new_value < min_value or new_value > max_value:
+                    self.add_left_button.setDisabled(True)
+                    self.add_right_button.setDisabled(True)
+                    return
+
+                self.add_left_button.setDisabled(new_value >= parent_value or parent_node.left is not None)
+                self.add_right_button.setDisabled(new_value <= parent_value or parent_node.right is not None)
+            else:
+                self.add_left_button.setDisabled(parent_node.left is not None)
+                self.add_right_button.setDisabled(parent_node.right is not None)
+
         except ValueError:
             self.add_left_button.setDisabled(True)
             self.add_right_button.setDisabled(True)
-            return
 
-        if self.tree_type == "BST":
-            self.add_left_button.setDisabled(value >= self.tree_root.val if self.tree_root else True)
-            self.add_right_button.setDisabled(value <= self.tree_root.val if self.tree_root else True)
-        elif self.tree_type == "AVL":
-            self.add_left_button.setDisabled(value >= self.tree_root.val if self.tree_root else True)
-            self.add_right_button.setDisabled(value <= self.tree_root.val if self.tree_root else True)
+    def get_valid_range(self, root, target_value, min_val=float('-inf'), max_val=float('inf')):
+        if not root:
+            return min_val, max_val
+        if root.val == target_value:
+            return min_val, max_val
+        if target_value < root.val:
+            return self.get_valid_range(root.left, target_value, min_val, root.val)
         else:
-            self.add_left_button.setDisabled(False)
-            self.add_right_button.setDisabled(False)
+            return self.get_valid_range(root.right, target_value, root.val, max_val)
+
+    def find_node(self, root, value):
+        if not root or root.val == value:
+            return root
+        left = self.find_node(root.left, value)
+        return left if left else self.find_node(root.right, value)
 
     def done_button_pressed(self):
-        """
-        Khi nút 'Hoàn tất' được nhấn, kiểm tra cây và trả về kết quả.
-        """
-        if self.tree_root is None:
-            QtWidgets.QMessageBox.warning(self, "Lỗi", "Vui lòng tạo ít nhất một nút gốc trước khi hoàn tất!")
+        if not self.tree_root:
+            QtWidgets.QMessageBox.warning(self, "Lỗi", "Vui lòng thêm ít nhất một nút gốc trước khi hoàn tất!")
             return
         self.accept()
 
 
-# Lớp ứng dụng PyQt5 cho giao diện chính
 class TreeApp(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.tree_root = None
         self.manual_tree_type = None  # Loại cây thủ công đang được chọn
-        self.initUI()
+        self.paused = False  # Trạng thái tạm dừng
         self.traversal_timer = QtCore.QTimer(self)
         self.traversal_index = 0  # Chỉ số cho quá trình duyệt cây
         self.traversal_nodes = []  # Danh sách các nút để duyệt
         self.traversal_result = []
-        self.traversal_timer.setSingleShot(True)  # Đảm bảo timer chỉ chạy một lần
+        self.initUI()
         self.showMaximized()
+
+    def show_search_dialog(self):
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Chọn kiểu tìm kiếm")
+        dialog.setFixedSize(300, 200)
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.addWidget(QtWidgets.QLabel("Chọn kiểu tìm kiếm:"))
+
+        search_type_combo = QtWidgets.QComboBox(dialog)
+        search_type_combo.addItems(["DFS (Tìm tuyến tính)", "BFS (Tìm theo cấp)", "BST (Tìm nhị phân)"])
+        layout.addWidget(search_type_combo)
+
+        value_input = QtWidgets.QLineEdit(dialog)
+        value_input.setPlaceholderText("Nhập giá trị cần tìm...")
+        layout.addWidget(value_input)
+
+        button_layout = QtWidgets.QHBoxLayout()
+        search_button = QtWidgets.QPushButton("Tìm kiếm")
+        cancel_button = QtWidgets.QPushButton("Hủy")
+        button_layout.addWidget(search_button)
+        button_layout.addWidget(cancel_button)
+
+        layout.addLayout(button_layout)
+
+        # Xử lý khi nhấn nút
+        def handle_search():
+            try:
+                value = int(value_input.text())
+                search_type = search_type_combo.currentText()
+                dialog.accept()
+                self.start_search(search_type, value)
+            except ValueError:
+                QtWidgets.QMessageBox.warning(dialog, "Lỗi", "Vui lòng nhập số nguyên hợp lệ!")
+
+        search_button.clicked.connect(handle_search)
+        cancel_button.clicked.connect(dialog.reject)
+
+        dialog.exec_()
+
 
     def initUI(self):
         self.setWindowTitle('Binary Tree Manager')
@@ -477,24 +679,50 @@ class TreeApp(QtWidgets.QWidget):
         main_layout.addWidget(QtWidgets.QLabel("Danh sách các nút của cây:"))
         main_layout.addWidget(self.node_list_textbox)
 
-        # Thêm thanh trượt tốc độ và nhãn vào `input_layout`
-        input_layout.addWidget(QtWidgets.QLabel("Tốc độ duyệt:"))
+        # Thêm nút tìm giá trị vào giao diện trong initUI
+        self.search_value_button = QtWidgets.QPushButton("🔍Tìm giá trị")
+        self.search_value_button.setFixedSize(90, 30)
+        self.search_value_button.setStyleSheet("background-color: #4682B4; color: white; font-weight: bold; font-size: 12px;")
+        self.search_value_button.clicked.connect(self.show_search_dialog)
+        input_layout.addWidget(self.search_value_button)
 
-        # Thanh trượt tốc độ duyệt cây
+        # Thanh trượt tốc độ và khu vực cho nút tạm dừng
+        slider_layout = QtWidgets.QHBoxLayout()
+
+        slider_layout.addWidget(QtWidgets.QLabel("Tốc độ duyệt:"))
         self.speed_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.speed_slider.setMinimum(0)
         self.speed_slider.setMaximum(100)
-        self.speed_slider.setValue(50)  # Giá trị mặc định
-        self.speed_slider.setFixedWidth(100)  # Giới hạn chiều rộng để hiển thị nhỏ
+        self.speed_slider.setValue(50)
+        self.speed_slider.setFixedWidth(150)
         self.speed_slider.valueChanged.connect(self.update_speed_label)
-        input_layout.addWidget(self.speed_slider)
+        slider_layout.addWidget(self.speed_slider)
 
-        # Nhãn hiển thị giá trị hiện tại của thanh trượt
         self.speed_label = QtWidgets.QLabel("50")
-        input_layout.addWidget(self.speed_label)
+        slider_layout.addWidget(self.speed_label)
 
-        # Thêm layout các nút và thanh trượt vào layout chính
-        main_layout.addLayout(input_layout)
+        # Đặt nút tạm dừng vào góc bên phải, bên dưới thanh trượt
+        self.pause_button = QtWidgets.QPushButton("Tạm dừng")
+        self.pause_button.setStyleSheet(
+            "background-color: #4682B4; color: white; font-weight: bold; font-size: 12px;")
+        self.pause_button.clicked.connect(self.toggle_pause)
+        slider_layout.addWidget(self.pause_button, alignment=QtCore.Qt.AlignRight)
+
+        # Nút export cây
+        self.export_tree_button = QtWidgets.QPushButton("Xuất cây")
+        self.export_tree_button.setStyleSheet(
+            "background-color: #4682B4; color: white; font-weight: bold; font-size: 14px;")
+        self.export_tree_button.clicked.connect(self.export_tree_to_file)
+        input_layout.addWidget(self.export_tree_button)
+
+        # Nút import cây
+        self.import_tree_button = QtWidgets.QPushButton("Nhập cây")
+        self.import_tree_button.setStyleSheet(
+            "background-color: #4682B4; color: white; font-weight: bold; font-size: 14px;")
+        self.import_tree_button.clicked.connect(self.import_tree_from_file)
+        input_layout.addWidget(self.import_tree_button)
+
+        main_layout.addLayout(slider_layout)
     def create_random_tree(self):
         try:
             node_count = int(self.node_count_input.text())
@@ -607,70 +835,293 @@ class TreeApp(QtWidgets.QWidget):
             current_level = next_level
         return levels
 
+    def export_tree_to_file(self):
+        """
+        Xuất cây hiện tại vào file theo dạng:
+        parent_value,left_child_value,right_child_value
+        Duyệt toàn bộ cây con trái trước rồi mới đến cây con phải.
+        """
+        if not self.tree_root:
+            QtWidgets.QMessageBox.warning(self, "Lỗi", "Cây hiện tại trống, không thể xuất!")
+            return
+
+        # Chọn đường dẫn file để lưu
+        options = QtWidgets.QFileDialog.Options()
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Lưu cây vào file", "", "Text Files (*.txt)",
+                                                             options=options)
+        if not file_path:
+            return
+
+        # Duyệt cây con trái trước, rồi tới cây con phải
+        def dfs_export_left_to_right(node, file):
+            if not node:
+                return
+
+            left_val = node.left.val if node.left else "null"
+            right_val = node.right.val if node.right else "null"
+            file.write(f"{node.val},{left_val},{right_val}\n")  # Ghi giá trị nút cha và con trái/phải
+
+            # Duyệt cây con trái trước toàn bộ
+            dfs_export_left_to_right(node.left, file)
+            # Sau đó mới duyệt cây con phải
+            dfs_export_left_to_right(node.right, file)
+
+        # Ghi vào file
+        with open(file_path, 'w') as file:
+            dfs_export_left_to_right(self.tree_root, file)
+
+        QtWidgets.QMessageBox.information(self, "Thành công", "Cây đã được xuất thành công!")
+
+    def import_tree_from_file(self):
+        """
+        Nhập cây từ file theo định dạng:
+        parent_value,left_child_value,right_child_value
+        """
+        options = QtWidgets.QFileDialog.Options()
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Nhập cây từ file", "", "Text Files (*.txt)",
+                                                             options=options)
+        if not file_path:
+            return
+
+        nodes = {}  # Dictionary để lưu các nút đã tạo
+        root = None
+
+        # Đọc file và tạo các nút
+        with open(file_path, 'r') as file:
+            for line in file:
+                parent, left, right = line.strip().split(',')
+                parent_val = int(parent)
+                left_val = int(left) if left != "null" else None
+                right_val = int(right) if right != "null" else None
+
+                # Tạo nút cha nếu chưa tồn tại
+                if parent_val not in nodes:
+                    nodes[parent_val] = Node(parent_val)
+                current_node = nodes[parent_val]
+
+                # Gán nút gốc nếu chưa có
+                if root is None:
+                    root = current_node
+
+                # Tạo và gán con trái
+                if left_val is not None and left_val not in nodes:
+                    nodes[left_val] = Node(left_val)
+                current_node.left = nodes[left_val] if left_val else None
+
+                # Tạo và gán con phải
+                if right_val is not None and right_val not in nodes:
+                    nodes[right_val] = Node(right_val)
+                current_node.right = nodes[right_val] if right_val else None
+
+        self.tree_root = root  # Gán lại cây gốc
+        self.display_tree()  # Hiển thị cây trên giao diện
+        QtWidgets.QMessageBox.information(self, "Thành công", "Cây đã được nhập thành công!")
+
     def add_node(self, parent_node_val):
-        # Thêm nút con cho một nút cụ thể
-        key, ok = QtWidgets.QInputDialog.getInt(self, "Thêm nút", "Nhập giá trị nút mới:")
-        if ok:
+        """
+        Thêm nút con mới vào cây.
+        """
+        try:
             tree_type = self.tree_type_combo.currentText()
             parent_node = self.find_node(self.tree_root, parent_node_val)
-            if parent_node is None:
+            if not parent_node:
+                QtWidgets.QMessageBox.warning(self, "Lỗi", "Không tìm thấy nút cha!")
                 return
+
+            new_val, ok = QtWidgets.QInputDialog.getInt(self, "Thêm nút", "Nhập giá trị nút mới:")
+            if not ok:
+                return
+
             if tree_type == "Cây nhị phân thông thường":
-                position, ok = QtWidgets.QInputDialog.getItem(self, "Vị trí thêm nút", "Chọn vị trí thêm nút:",
-                                                              ["left", "right"], 0, False)
-                if ok:
-                    if position == "left":
-                        parent_node.left = insert_binary(parent_node.left, key)
-                    elif position == "right":
-                        parent_node.right = insert_binary(parent_node.right, key)
+                # Kiểm tra trạng thái nút con trái và phải
+                if parent_node.left and parent_node.right:
+                    QtWidgets.QMessageBox.information(self, "Thông báo", "Nút đã có đủ 2 con, không thể thêm!")
+                    return
+
+                # Xác định vị trí cần thêm
+                options = []
+                if not parent_node.left:
+                    options.append("Trái")
+                if not parent_node.right:
+                    options.append("Phải")
+
+                side, ok = QtWidgets.QInputDialog.getItem(self, "Chọn vị trí", "Thêm vào vị trí:", options, 0, False)
+                if not ok:
+                    return
+
+                if side == "Trái":
+                    parent_node.left = Node(new_val)
+                elif side == "Phải":
+                    parent_node.right = Node(new_val)
+
             elif tree_type == "BST":
-                insert_bst(parent_node, key)
+                self.tree_root = insert_bst(self.tree_root, new_val)
             elif tree_type == "AVL":
-                self.tree_root = insert_avl(self.tree_root, key)
+                self.tree_root = insert_avl(self.tree_root, new_val)
+            else:
+                QtWidgets.QMessageBox.warning(self, "Lỗi", "Loại cây không hỗ trợ thêm nút!")
+                return
+
             self.display_tree()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Lỗi", f"Không thể thêm nút: {e}")
 
     def delete_node(self, node_val):
-        # Xóa một nút đã chọn cụ thể trong cây
-        if node_val not in self.canvas.selected_nodes:
-            QtWidgets.QMessageBox.warning(self, "Lỗi", "Vui lòng chọn một nút để xóa!")
-            return
-        tree_type = self.tree_type_combo.currentText()
-        if tree_type == "BST":
-            self.tree_root = delete_bst(self.tree_root, node_val)
-        elif tree_type == "AVL":
-            self.tree_root = delete_avl(self.tree_root, node_val)
-        elif tree_type == "Cây nhị phân thông thường":
-            self.tree_root = delete_binary(self.tree_root, node_val)
-        else:
-            QtWidgets.QMessageBox.warning(self, "Lỗi",
-                                          "Xóa nút chỉ hỗ trợ cho cây BST, AVL và cây nhị phân thông thường!")
-            return
-        self.canvas.selected_nodes.remove(node_val)
-        self.display_tree()
+        """
+        Xóa nút theo logic của từng loại cây.
+        """
+        try:
+            tree_type = self.tree_type_combo.currentText()
+            if tree_type == "Cây nhị phân thông thường":
+                self.tree_root = delete_binary(self.tree_root, node_val)
+            elif tree_type == "BST":
+                self.tree_root = delete_bst(self.tree_root, node_val)
+            elif tree_type == "AVL":
+                self.tree_root = delete_avl(self.tree_root, node_val)
+            else:
+                QtWidgets.QMessageBox.warning(self, "Lỗi", "Loại cây không hỗ trợ xóa nút!")
+                return
+
+            self.display_tree()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Lỗi", f"Không thể xóa nút: {e}")
 
     def find_node(self, root, val):
-        # Tìm và trả về nút có giá trị val trong cây
-        if root is None or root.val == val:
+        """
+        Tìm nút có giá trị val trong cây, hoạt động với cả cây nhị phân thông thường.
+        """
+        if root is None:
+            return None
+        if root.val == val:
             return root
-        if val < root.val:
-            return self.find_node(root.left, val)
+        # Tìm ở cây con trái
+        left_result = self.find_node(root.left, val)
+        if left_result:
+            return left_result
+        # Tìm ở cây con phải
         return self.find_node(root.right, val)
+
+    def start_search(self, search_type, value):
+        if not self.tree_root:
+            QtWidgets.QMessageBox.warning(self, "Lỗi", "Vui lòng tạo cây trước khi tìm kiếm!")
+            return
+
+        # Xác định kiểu tìm kiếm
+        if search_type == "DFS (Tìm tuyến tính)":
+            self.search_nodes = self.dfs_search_steps(self.tree_root, value)
+        elif search_type == "BFS (Tìm theo cấp)":
+            self.search_nodes = self.bfs_search_steps(self.tree_root, value)
+        elif search_type == "BST (Tìm nhị phân)":
+            self.search_nodes = self.bst_search_steps(self.tree_root, value)
+
+        self.search_index = 0
+        self.search_value = value
+        self.paused = False
+        self.pause_button.setText("Tạm dừng")
+        self.search_step()
+
+    def search_step(self):
+        if self.paused or self.search_index >= len(self.search_nodes):
+            if self.search_index >= len(self.search_nodes):
+                QtWidgets.QMessageBox.information(self, "Kết quả",
+                                                  f"Giá trị {self.search_value} {'được tìm thấy!' if self.search_value in self.search_nodes else 'không tồn tại trong cây!'}")
+            return
+
+        current_node = self.search_nodes[self.search_index]
+        self.canvas.selected_nodes.clear()
+        self.canvas.selected_nodes.add(current_node)
+        self.canvas.display_tree(self.tree_root)
+
+        if current_node == self.search_value:
+            QtWidgets.QMessageBox.information(self, "Tìm kiếm thành công", f"Đã tìm thấy giá trị {self.search_value}!")
+            return
+
+        self.search_index += 1
+        QtCore.QTimer.singleShot(500, self.search_step)
+
+    def dfs_search_steps(self, node, value):
+        steps = []
+
+        def dfs(node):
+            if not node:
+                return
+            steps.append(node.val)
+            if node.val == value:
+                return
+            dfs(node.left)
+            dfs(node.right)
+
+        dfs(node)
+        return steps
+
+    def bfs_search_steps(self, root, value):
+        steps = []
+        queue = deque([root])
+        while queue:
+            node = queue.popleft()
+            steps.append(node.val)
+            if node.val == value:
+                break
+            if node.left:
+                queue.append(node.left)
+            if node.right:
+                queue.append(node.right)
+        return steps
+
+    def bst_search_steps(self, node, value):
+        steps = []
+        while node:
+            steps.append(node.val)
+            if node.val == value:
+                break
+            if value < node.val:
+                node = node.left
+            else:
+                node = node.right
+        return steps
+
+    def highlight_tree_not_found(self):
+        for _ in range(3):
+            self.canvas.selected_nodes = set(self.get_all_nodes(self.tree_root))
+            self.canvas.display_tree(self.tree_root)
+            QtCore.QThread.msleep(300)
+            self.canvas.selected_nodes.clear()
+            self.canvas.display_tree(self.tree_root)
 
     def update_speed_label(self):
         # Cập nhật giá trị của nhãn khi giá trị của thanh trượt thay đổi
         self.speed_label.setText(str(self.speed_slider.value()))
 
+    def toggle_pause(self):
+        """
+        Thay đổi trạng thái tạm dừng hoặc tiếp tục.
+        """
+        if not self.traversal_nodes:  # Nếu không có gì để duyệt, vô hiệu hóa
+            return
+
+        self.paused = not self.paused
+        if self.paused:
+            self.pause_button.setText("Tiếp tục")
+        else:
+            self.pause_button.setText("Tạm dừng")
+            self.traversal_step()  # Tiếp tục duyệt cây
+
     def start_traversal(self):
+        """
+        Khởi động duyệt cây từ đầu và kích hoạt nút tạm dừng.
+        """
         if not self.tree_root:
             QtWidgets.QMessageBox.warning(self, "Lỗi", "Vui lòng tạo một cây trước khi duyệt!")
             return
 
+        # Reset các trạng thái
         self.traversal_index = 0
         self.traversal_result = []
         self.traversal_nodes = []
         self.canvas.selected_nodes.clear()
         self.canvas.display_tree(self.tree_root)
 
+        # Lấy kiểu duyệt cây
         traversal_type = self.traversal_type_combo.currentText()
         if traversal_type == "Preorder":
             self.traversal_nodes = self.preorder(self.tree_root)
@@ -679,26 +1130,54 @@ class TreeApp(QtWidgets.QWidget):
         elif traversal_type == "Postorder":
             self.traversal_nodes = self.postorder(self.tree_root)
 
+        # Kích hoạt nút tạm dừng và cập nhật trạng thái
+        self.paused = False
+        self.pause_button.setEnabled(True)
+        self.pause_button.setText("Tạm dừng")
+
+        # Vô hiệu hóa các nút khác trong quá trình duyệt
+        self.create_random_tree_button.setEnabled(False)
+        self.create_manual_tree_button.setEnabled(False)
+        self.traverse_button.setEnabled(False)
+
         self.traversal_step()
 
     def traversal_step(self):
+        """
+        Thực hiện từng bước duyệt cây. Hỗ trợ tạm dừng và vô hiệu hóa nút khi hoàn tất.
+        """
+        if self.paused:  # Nếu đang tạm dừng, không thực hiện bước tiếp theo
+            return
+
         if self.traversal_index < len(self.traversal_nodes):
             current_node = self.traversal_nodes[self.traversal_index]
             self.traversal_result.append(current_node)
 
             # Cập nhật danh sách các nút đã duyệt ngay lập tức
-            self.node_list_textbox.setPlainText(" -> ".join(map(str, self.traversal_result)))
+            self.node_list_textbox.setPlainText(" → ".join(map(str, self.traversal_result)))
 
+            # Hiển thị trạng thái trên cây
             self.canvas.selected_nodes.clear()
             self.canvas.selected_nodes.add(current_node)
             self.canvas.display_tree(self.tree_root)
+
             self.traversal_index += 1
 
-            # Tính toán thời gian chờ theo giá trị của thanh trượt
+            # Tính toán thời gian chờ theo tốc độ thanh trượt
             delay = max(100, (100 - self.speed_slider.value()) * 10)
             QtCore.QTimer.singleShot(delay, self.traversal_step)
         else:
-            QtCore.QTimer.singleShot(1000, self.reset_tree_colors)
+            # Hoàn thành duyệt cây -> reset trạng thái
+            QtWidgets.QMessageBox.information(self, "Hoàn tất", "Duyệt cây đã hoàn thành!")
+            self.reset_tree_colors()
+
+            # Disable nút tạm dừng
+            self.pause_button.setEnabled(False)
+
+            # Kích hoạt lại các nút khác
+            self.create_random_tree_button.setEnabled(True)
+            self.create_manual_tree_button.setEnabled(True)
+            self.traverse_button.setEnabled(True)
 
     def reset_tree_colors(self):
         self.canvas.selected_nodes.clear()
