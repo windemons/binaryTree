@@ -142,35 +142,28 @@ def delete_avl(root, key):
 
 
 def delete_binary(node, key):
-    """
-    Xóa nút có giá trị 'key' trong cây nhị phân thông thường.
-    """
     if node is None:
         return None  # Nút rỗng, không cần xử lý
 
-    # Tìm nút cần xóa ở cây con trái hoặc cây con phải
-    if random.choice([True, False]):  # Lựa chọn ngẫu nhiên (đặc trưng của cây nhị phân thông thường)
-        node.left = delete_binary(node.left, key)
-    else:
-        node.right = delete_binary(node.right, key)
-
+    # Kiểm tra nếu đây là nút cần xóa
     if node.val == key:
         # Trường hợp 1: Nút lá (không có con)
-        if node.left is None and node.right is None:
+        if not node.left and not node.right:
             return None
-
         # Trường hợp 2: Nút có 1 con
-        if node.left is None:
-            return node.right  # Gán con phải cho nút cha
-        elif node.right is None:
-            return node.left  # Gán con trái cho nút cha
-
+        if not node.left:
+            return node.right
+        if not node.right:
+            return node.left
         # Trường hợp 3: Nút có 2 con
-        # Thay thế bằng giá trị nhỏ nhất trong cây con phải
         temp = get_min_value_node(node.right)
         node.val = temp.val
         node.right = delete_binary(node.right, temp.val)
+        return node
 
+    # Duyệt cả hai nhánh để tìm nút cần xóa
+    node.left = delete_binary(node.left, key)
+    node.right = delete_binary(node.right, key)
     return node
 
 
