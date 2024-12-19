@@ -231,12 +231,16 @@ class TreeCanvas(FigureCanvas):
         fig, self.ax = plt.subplots(figsize=(10, 8))
         super().__init__(fig)
         self.setParent(parent)
-        self.selected_nodes = set()  # Nút đã được chọn
+        self.selected_nodes = set()  # Các nút được chọn bằng chuột trái
         self.node_positions = {}  # Tọa độ logic của các nút
         self.context_menu = QtWidgets.QMenu(self)  # Menu chuột phải
+        self.dragging_node = None  # Nút đang được kéo
+        self.target_node = None  # Nút mục tiêu để đổi chỗ
 
         # Kết nối sự kiện chuột
         self.mpl_connect("button_press_event", self.on_mouse_click)
+        self.mpl_connect("motion_notify_event", self.on_mouse_drag)
+        self.mpl_connect("button_release_event", self.on_mouse_release)
 
     def display_tree(self, root):
         """
@@ -263,20 +267,39 @@ class TreeCanvas(FigureCanvas):
         calculate_positions(root)
 
         # Tô màu các nút
-        node_colors = ["red" if n in self.selected_nodes else "lightblue" for n in G.nodes()]
-        nx.draw(G, self.node_positions, with_labels=True, labels={n: n for n in G.nodes()},
-                node_size=1500, node_color=node_colors, font_size=12, font_weight='bold', ax=self.ax, arrows=False)
+        node_colors = [
+            "red" if n in self.selected_nodes else
+            "green" if n == self.dragging_node else
+            "yellow" if n == self.target_node else
+            "lightblue"
+            for n in G.nodes()
+        ]
+
+        nx.draw(
+            G,
+            self.node_positions,
+            with_labels=True,
+            labels={n: n for n in G.nodes()},
+            node_size=1500,
+            node_color=node_colors,
+            font_size=12,
+            font_weight="bold",
+            ax=self.ax,
+            arrows=False,
+        )
         self.draw()
 
     def on_mouse_click(self, event):
         """
-        Xử lý sự kiện click chuột để chọn nút hoặc hiện context menu.
+        Xử lý sự kiện click chuột.
+        Chuột trái: Chọn hoặc bỏ chọn nút.
+        Chuột phải: Hiện context menu cho nút đã được chọn.
         """
         if event.xdata is None or event.ydata is None:
             return  # Không click vào vùng hợp lệ
 
         clicked_node = None
-        min_distance = float('inf')
+        min_distance = float("inf")
 
         # Xác định nút gần nhất với vị trí chuột
         for node, (x, y) in self.node_positions.items():
@@ -289,7 +312,8 @@ class TreeCanvas(FigureCanvas):
             if event.button == 1:  # Chuột trái
                 self.toggle_node_selection(clicked_node)
             elif event.button == 3:  # Chuột phải
-                self.show_context_menu(event, clicked_node)
+                if clicked_node in self.selected_nodes:  # Chỉ hiện menu nếu nút được chọn
+                    self.show_context_menu(event, clicked_node)
 
     def toggle_node_selection(self, node):
         """
@@ -324,6 +348,49 @@ class TreeCanvas(FigureCanvas):
 
         # Hiển thị menu tại vị trí chuột
         self.context_menu.exec_(self.mapToGlobal(QtCore.QPoint(event.x, event.y)))
+
+    def on_mouse_drag(self, event):
+        """
+        Xử lý kéo nút bằng chuột.
+        """
+        if event.xdata is None or event.ydata is None:
+            return  # Không drag vào vùng hợp lệ
+
+        if self.dragging_node is None:
+            # Xác định nút được kéo
+            for node, (x, y) in self.node_positions.items():
+                distance = ((event.xdata - x) ** 2 + (event.ydata - y) ** 2) ** 0.5
+                if distance < 0.5 and node in self.selected_nodes:  # Chỉ kéo nút đã được chọn
+                    self.dragging_node = node
+                    break
+        else:
+            # Xác định nút mục tiêu
+            self.target_node = None
+            for node, (x, y) in self.node_positions.items():
+                distance = ((event.xdata - x) ** 2 + (event.ydata - y) ** 2) ** 0.5
+                if distance < 0.5 and node != self.dragging_node:  # Không được trùng nút kéo
+                    self.target_node = node
+                    break
+
+        self.display_tree(self.parent().tree_root)
+
+    def on_mouse_release(self, event):
+        """
+        Xử lý khi thả nút chuột để đổi chỗ các nút.
+        """
+        if self.dragging_node and self.target_node:
+            # Đổi giá trị giữa dragging_node và target_node
+            dragging_node_obj = self.parent().find_node(self.parent().tree_root, self.dragging_node)
+            target_node_obj = self.parent().find_node(self.parent().tree_root, self.target_node)
+
+            if dragging_node_obj and target_node_obj:
+                dragging_node_obj.val, target_node_obj.val = target_node_obj.val, dragging_node_obj.val
+
+        # Reset trạng thái kéo
+        self.dragging_node = None
+        self.target_node = None
+
+        self.display_tree(self.parent().tree_root)
 
 
 class ManualTreeDialog(QtWidgets.QDialog):
@@ -830,9 +897,9 @@ class TreeApp(QtWidgets.QWidget):
 
     def export_tree_to_file(self):
         """
-        Xuất cây hiện tại vào file theo dạng:
+        Xuất cây hiện tại vào file theo định dạng:
+        Loại cây
         parent_value,left_child_value,right_child_value
-        Duyệt toàn bộ cây con trái trước rồi mới đến cây con phải.
         """
         if not self.tree_root:
             QtWidgets.QMessageBox.warning(self, "Lỗi", "Cây hiện tại trống, không thể xuất!")
@@ -845,29 +912,30 @@ class TreeApp(QtWidgets.QWidget):
         if not file_path:
             return
 
-        # Duyệt cây con trái trước, rồi tới cây con phải
+        tree_type = self.tree_type_combo.currentText()  # Lấy loại cây hiện tại (Binary, BST, AVL)
+
         def dfs_export_left_to_right(node, file):
             if not node:
                 return
-
             left_val = node.left.val if node.left else "null"
             right_val = node.right.val if node.right else "null"
-            file.write(f"{node.val},{left_val},{right_val}\n")  # Ghi giá trị nút cha và con trái/phải
-
-            # Duyệt cây con trái trước toàn bộ
+            file.write(f"{node.val},{left_val},{right_val}\n")  # Ghi giá trị cha và con
             dfs_export_left_to_right(node.left, file)
-            # Sau đó mới duyệt cây con phải
             dfs_export_left_to_right(node.right, file)
 
-        # Ghi vào file
-        with open(file_path, 'w') as file:
-            dfs_export_left_to_right(self.tree_root, file)
+        try:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(f"{tree_type}\n")  # Ghi loại cây trên dòng đầu tiên
+                dfs_export_left_to_right(self.tree_root, file)
 
-        QtWidgets.QMessageBox.information(self, "Thành công", "Cây đã được xuất thành công!")
+            QtWidgets.QMessageBox.information(self, "Thành công", "Cây đã được xuất thành công!")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Lỗi", f"Không thể lưu cây: {str(e)}")
 
     def import_tree_from_file(self):
         """
         Nhập cây từ file theo định dạng:
+        Loại cây
         parent_value,left_child_value,right_child_value
         """
         options = QtWidgets.QFileDialog.Options()
@@ -879,36 +947,49 @@ class TreeApp(QtWidgets.QWidget):
         nodes = {}  # Dictionary để lưu các nút đã tạo
         root = None
 
-        # Đọc file và tạo các nút
-        with open(file_path, 'r') as file:
-            for line in file:
-                parent, left, right = line.strip().split(',')
-                parent_val = int(parent)
-                left_val = int(left) if left != "null" else None
-                right_val = int(right) if right != "null" else None
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
 
-                # Tạo nút cha nếu chưa tồn tại
-                if parent_val not in nodes:
-                    nodes[parent_val] = Node(parent_val)
-                current_node = nodes[parent_val]
+                if not lines:
+                    raise ValueError("Tệp rỗng, không có dữ liệu để nhập.")
 
-                # Gán nút gốc nếu chưa có
-                if root is None:
-                    root = current_node
+                tree_type = lines[0].strip()  # Lấy loại cây từ dòng đầu tiên
+                self.tree_type_combo.setCurrentText(tree_type)  # Đặt loại cây trong giao diện
 
-                # Tạo và gán con trái
-                if left_val is not None and left_val not in nodes:
-                    nodes[left_val] = Node(left_val)
-                current_node.left = nodes[left_val] if left_val else None
+                # Đọc từng dòng tiếp theo để tạo các nút
+                for line in lines[1:]:
+                    parent, left, right = line.strip().split(',')
+                    parent_val = int(parent)
+                    left_val = int(left) if left != "null" else None
+                    right_val = int(right) if right != "null" else None
 
-                # Tạo và gán con phải
-                if right_val is not None and right_val not in nodes:
-                    nodes[right_val] = Node(right_val)
-                current_node.right = nodes[right_val] if right_val else None
+                    # Tạo nút cha nếu chưa tồn tại
+                    if parent_val not in nodes:
+                        nodes[parent_val] = Node(parent_val)
+                    current_node = nodes[parent_val]
 
-        self.tree_root = root  # Gán lại cây gốc
-        self.display_tree()  # Hiển thị cây trên giao diện
-        QtWidgets.QMessageBox.information(self, "Thành công", "Cây đã được nhập thành công!")
+                    # Gán nút gốc nếu chưa có
+                    if root is None:
+                        root = current_node
+
+                    # Tạo và gán con trái
+                    if left_val is not None:
+                        if left_val not in nodes:
+                            nodes[left_val] = Node(left_val)
+                        current_node.left = nodes[left_val]
+
+                    # Tạo và gán con phải
+                    if right_val is not None:
+                        if right_val not in nodes:
+                            nodes[right_val] = Node(right_val)
+                        current_node.right = nodes[right_val]
+
+            self.tree_root = root  # Gán lại cây gốc
+            self.display_tree()  # Hiển thị cây trên giao diện
+            QtWidgets.QMessageBox.information(self, "Thành công", "Cây đã được nhập thành công!")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Lỗi", f"Không thể nhập cây: {str(e)}")
 
     def add_node(self, parent_node_val):
         """
